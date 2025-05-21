@@ -5,16 +5,16 @@ import matplotlib.pyplot as plt
 # Parameters
 n = 3  # 3x3 magic square
 population_size = 100
-mutation_rate = 0.2  # Increased for better exploration
+mutation_rate = 0.2
 generations = 500
 
 
-# Generate initial population (valid permutations)
+# Generate initial population (random permutations of 1 to n²)
 def generate_individual(n):
-    return np.random.permutation(n * n) + 1  # Valid permutation of 1-9
+    return np.random.permutation(n * n) + 1  # e.g., [8,1,6,3,5,7,4,9,2]
 
 
-# Magic constant (sum for rows, cols, diagonals)
+# fixed sum that all rows, columns, and both main diagonals of a magic square must equal.
 def magic_constant(n):
     return n * (n**2 + 1) // 2  # 15 for n=3
 
@@ -39,7 +39,7 @@ def fitness_score(individual, n):
     return 1 / (1 + total_deviation)  # Higher is better
 
 
-# Crossover that always produces valid permutations
+# Crossover that always produces valid permutations, discarding invalid children
 def crossover(parent1, parent2, n):
     size = n * n
     while True:  # Keep trying until we get a valid child
@@ -82,9 +82,9 @@ for age in range(generations):
     best_fitness.append(current_best)
     avg_fitness.append(np.mean(population_fitness))
 
-    # Early exit if perfect magic square found
+    # Early exit if magic square found
     if current_best == 1:
-        print(f"Perfect magic square found at generation {age}!")
+        print(f"Magic square found at generation {age}!")
         break
 
     # Selection and reproduction
