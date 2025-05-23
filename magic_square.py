@@ -3,7 +3,7 @@ import random
 import matplotlib.pyplot as plt
 
 # Parameters
-n = 3  # 3x3 magic square
+n = 3 # nxn magic square
 population_size = 100
 mutation_rate = 0.2
 generations = 500
@@ -20,6 +20,7 @@ def magic_constant(n):
 
 
 # Fitness function (only valid permutations reach here)
+max_fit = 1
 def fitness_score(individual, n):
     square = np.array(individual).reshape(n, n)
     M = magic_constant(n)
@@ -36,7 +37,7 @@ def fitness_score(individual, n):
     diag2_sum = np.sum(np.diag(np.fliplr(square)))
     total_deviation = total_deviation + abs(diag1_sum - M) + abs(diag2_sum - M)
 
-    return 1 / (1 + total_deviation)  # Higher is better
+    return (1 / (1 + total_deviation))**2  # Higher is better
 
 
 # Crossover that always produces valid permutations, discarding invalid children
@@ -83,7 +84,7 @@ for age in range(generations):
     avg_fitness.append(np.mean(population_fitness))
 
     # Early exit if magic square found
-    if current_best == 1:
+    if current_best == max_fit:
         print(f"Magic square found at generation {age}!")
         break
 
@@ -94,6 +95,9 @@ for age in range(generations):
         parent1, parent2 = random.choices(population, weights=population_fitness, k=2)
         child = crossover(parent1, parent2, n)  # This always returns valid children
         new_population.append(child)
+    #elitisem
+    best_idx = np.argmax([fitness_score(ind, n) for ind in population])
+    new_population[-1] = population[best_idx]
     population = new_population
 
 # Plot results
