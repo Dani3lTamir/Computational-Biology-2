@@ -286,8 +286,9 @@ def calc_problamtic_positions(individual, n):
     # Remove duplicates
     problematic_positions = list(set(problematic_positions))
 
-    if len(problematic_positions < 2): # no collision between rows
-        number_of bad 
+    if len(problematic_positions) < 2: # no collision
+        # add full diagonal
+        1+1 # change it later
 
     return problematic_positions
             
