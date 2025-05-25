@@ -5,10 +5,10 @@ from collections import Counter
 
 # Parameters
 n = 4  # nxn magic square
-population_size = 100  
+population_size = 100
 base_mutation_rate = 0.7
 adaptive_mutation = True
-generations = 500 
+generations = 125 * n
 diversity_threshold = 0.3  # Trigger diversity measures if similarity > 80%
 tournament_size = 7  # For tournament selection
 
@@ -42,8 +42,96 @@ def magic_constant(n):
     return n * (n**2 + 1) // 2
 
 
+def is_magic_square(individual, n):
+    """Check if individual forms a valid magic square"""
+    square = np.array(individual).reshape(n, n)
+    M = magic_constant(n)
 
-def fitness_score(individual, n, population=None, diversity_bonus=False):
+    # Check if all numbers 1 to n² are present exactly once
+    if sorted(individual) != list(range(1, n * n + 1)):
+        return False
+
+    # Check rows
+    for i in range(n):
+        if sum(square[i, :]) != M:
+            return False
+
+    # Check columns
+    for i in range(n):
+        if sum(square[:, i]) != M:
+            return False
+
+    # Check diagonals
+    if sum(np.diag(square)) != M:
+        return False
+    if sum(np.diag(np.fliplr(square))) != M:
+        return False
+
+    return True
+
+
+def is_most_perfect_magic_square(individual, n):
+    """Check if individual forms a most-perfect magic square (only for n%4=0)"""
+    if n % 4 != 0:
+        return False
+
+    if not is_magic_square(individual, n):
+        return False
+
+    square = np.array(individual).reshape(n, n)
+    M = magic_constant(n)
+
+    # For most-perfect magic squares, every 2x2 subsquare must sum to M
+    expected_sum = M
+
+    # Check all possible 2x2 subsquares
+    for i in range(n - 1):
+        for j in range(n - 1):
+            subsquare_sum = (
+                square[i, j]
+                + square[i, j + 1]
+                + square[i + 1, j]
+                + square[i + 1, j + 1]
+            )
+            if subsquare_sum != expected_sum:
+                return False
+
+    return True
+
+
+def most_perfect_fitness_component(individual, n):
+    """Calculate fitness component for most-perfect property"""
+    if n % 4 != 0:
+        return 0
+
+    square = np.array(individual).reshape(n, n)
+    M = magic_constant(n)
+    expected_sum = M
+
+    total_deviation = 0
+    subsquare_count = 0
+
+    # Check all 2x2 subsquares
+    for i in range(n - 1):
+        for j in range(n - 1):
+            subsquare_sum = (
+                square[i, j]
+                + square[i, j + 1]
+                + square[i + 1, j]
+                + square[i + 1, j + 1]
+            )
+            total_deviation += abs(subsquare_sum - expected_sum)
+            subsquare_count += 1
+
+    # Return normalized score (higher is better)
+    if total_deviation == 0:
+        return 1.0
+    return 1.0 / (1.0 + total_deviation / subsquare_count)
+
+
+def fitness_score(
+    individual, n, population=None, diversity_bonus=False, prioritize_most_perfect=True
+):
     square = np.array(individual).reshape(n, n)
     M = magic_constant(n)
     total_deviation = 0
@@ -63,16 +151,24 @@ def fitness_score(individual, n, population=None, diversity_bonus=False):
     counts = Counter(individual)
     duplicate_penalty = sum((count - 1) * 100 for count in counts.values() if count > 1)
 
-    # Exponential fitness
-    k = 0.1
+    # Base fitness (magic square fitness)
     base_fitness = 1 / (1 + total_deviation + duplicate_penalty)
-    
+
+    # Most-perfect fitness component (only for n%4=0)
+    most_perfect_bonus = 0
+    if n % 4 == 0 and prioritize_most_perfect:
+        most_perfect_score = most_perfect_fitness_component(individual, n)
+        most_perfect_bonus = (
+            most_perfect_score * 0.5
+        )  # Weight the most-perfect component
+
     # Diversity bonus
+    diversity_bonus_score = 0
     if diversity_bonus and population is not None:
         uniqueness = calculate_individual_uniqueness(individual, population)
-        base_fitness += 0.1 * uniqueness
+        diversity_bonus_score = 0.1 * uniqueness
 
-    return base_fitness
+    return base_fitness + most_perfect_bonus + diversity_bonus_score
 
 
 def calculate_individual_uniqueness(individual, population):
@@ -136,25 +232,7 @@ def mutate(individual, mutation_rate, n, method="swap"):
         start, end = sorted(random.sample(range(size), 2))
         individual[start:end] = individual[start:end][::-1]
 
-
     return individual
-
-
-# Validate magic square
-def is_magic_square(individual, n):
-    square = np.array(individual).reshape(n, n)
-    M = magic_constant(n)
-    row_sums = [sum(square[i, :]) for i in range(n)]
-    col_sums = [sum(square[:, i]) for i in range(n)]
-    diag1 = sum(np.diag(square))
-    diag2 = sum(np.diag(np.fliplr(square)))
-    return (
-        all(s == M for s in row_sums)
-        and all(s == M for s in col_sums)
-        and diag1 == M
-        and diag2 == M
-        and len(set(individual)) == n * n
-    )
 
 
 # Main genetic algorithm
@@ -164,8 +242,18 @@ best_fitness = []
 diversity_history = []
 mutation_rates = []
 
+# Track if we found solutions
+magic_square_found = False
+most_perfect_found = False
+magic_square_generation = -1
+most_perfect_generation = -1
+
 print(f"Starting evolution for {n}x{n} magic square...")
 print(f"Magic constant should be: {magic_constant(n)}")
+if n % 4 == 0:
+    print(
+        f"Also searching for most-perfect magic square (2x2 subsquares sum to {magic_constant(n)})"
+    )
 
 for age in range(generations):
     diversity = calculate_diversity(population)
@@ -198,11 +286,25 @@ for age in range(generations):
     best_fitness.append(current_best)
     avg_fitness.append(np.mean(population_fitness))
 
-    # Check for valid magic square
+    # Check for valid magic square and most-perfect magic square
     best_idx = np.argmax(population_fitness)
-    if is_magic_square(population[best_idx], n):
-        print(f"Magic square found at generation {age}!")
-        break
+
+    if not magic_square_found and is_magic_square(population[best_idx], n):
+        magic_square_found = True
+        magic_square_generation = age
+        print(f"Regular magic square found at generation {age}!")
+        if n % 4 != 0: # if n is not a multiple of 4, we can stop here
+            break
+
+    if (
+        n % 4 == 0
+        and not most_perfect_found
+        and is_most_perfect_magic_square(population[best_idx], n)
+    ):
+        most_perfect_found = True
+        most_perfect_generation = age
+        print(f"Most-perfect magic square found at generation {age}!")
+        break  # Stop if we found the most-perfect square
 
     if age % 25 == 0:
         print(
@@ -296,7 +398,6 @@ print(best_square)
 print(f"Final fitness: {fitness_score(population[best_idx], n):.6f}")
 print(f"Final diversity: {diversity_history[-1]:.3f}")
 
-# Verify magic square properties
 M = magic_constant(n)
 row_sums = [sum(best_square[i, :]) for i in range(n)]
 col_sums = [sum(best_square[:, i]) for i in range(n)]
@@ -308,10 +409,37 @@ print(f"Col sums: {col_sums} (target: {M})")
 print(f"Diagonals: {diag1}, {diag2} (target: {M})")
 
 is_magic = is_magic_square(population[best_idx], n)
-print(f"Is valid magic square: {is_magic}")
-if is_magic:
-    print("🎉 SUCCESS! Perfect magic square found!")
-else:
+is_most_perfect = is_most_perfect_magic_square(population[best_idx], n)
+
+print(f"\nIs valid magic square: {is_magic}")
+if magic_square_found:
+    print(f"🎉 Regular magic square found at generation {magic_square_generation}!")
+
+if n % 4 == 0:
+    print(f"Is most-perfect magic square: {is_most_perfect}")
+    if most_perfect_found:
+        print(
+            f"🌟 Most-perfect magic square found at generation {most_perfect_generation}!"
+        )
+    elif is_magic:
+        print("Found regular magic square but not most-perfect.")
+
+        # Show 2x2 subsquare analysis
+        print("\n2x2 Subsquare Analysis:")
+        expected_sum = M
+        for i in range(n - 1):
+            for j in range(n - 1):
+                subsquare_sum = (
+                    best_square[i, j]
+                    + best_square[i, j + 1]
+                    + best_square[i + 1, j]
+                    + best_square[i + 1, j + 1]
+                )
+                print(
+                    f"Subsquare at ({i},{j}): {subsquare_sum} (target: {expected_sum})"
+                )
+
+if not is_magic:
     total_error = (
         sum(abs(s - M) for s in row_sums + col_sums) + abs(diag1 - M) + abs(diag2 - M)
     )
