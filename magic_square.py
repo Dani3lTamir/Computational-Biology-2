@@ -1,16 +1,27 @@
 import numpy as np
 import random
+import math
 import matplotlib.pyplot as plt
 from collections import Counter
+from enum import Enum
+
+
+class EvolutionType(Enum):
+    ORIGINAL = 0
+    LAMARCKIAN = 1
+    DARWINIAN = 2
+
 
 # Parameters
 n = 4  # nxn magic square
 population_size = 100
 base_mutation_rate = 0.7
 adaptive_mutation = True
-generations = 125 * n
+generations = 500
 diversity_threshold = 0.3  # Trigger diversity measures if similarity > 80%
 tournament_size = 7  # For tournament selection
+evolution_type = EvolutionType.DARWINIAN  # Change this to switch between versions
+optimization_steps = 5  # Number of local optimization steps to perform
 
 
 # Generate initial population (random permutations of 1 to n²)
@@ -235,6 +246,87 @@ def mutate(individual, mutation_rate, n, method="swap"):
     return individual
 
 
+def optimize_individual(individual, n, max_steps=None, temp=1.0, cooling_rate=0.95):
+    """Optimize magic square using targeted simulated annealing with improved swap selection."""
+    if max_steps is None:
+        max_steps = 3 * n  # Increased steps for more thorough optimization
+
+    current = individual.copy()
+    current_fitness = fitness_score(current, n)
+    M = magic_constant(n)
+    best = current.copy()
+    best_fitness = current_fitness
+    no_improvement_count = 0
+    max_no_improvement = n * 2  # Stop if no improvement after n*2 iterations
+
+    for step in range(max_steps):
+        # Dynamic temperature adjustment
+        temp = max(0.01, temp * cooling_rate)
+        if current_fitness > best_fitness * 0.9:  # If good progress, slow cooling
+            temp = min(temp * 1.1, 1.0)
+
+        # Reshape current individual into square
+        square = current.reshape(n, n)
+        row_sums = np.sum(square, axis=1)
+        col_sums = np.sum(square, axis=0)
+
+        # Find rows/columns with largest deviations
+        row_deviations = np.abs(row_sums - M)
+        col_deviations = np.abs(col_sums - M)
+        worst_row = np.argmax(row_deviations)
+        worst_col = np.argmax(col_deviations)
+
+        # Try multiple swap candidates
+        best_candidate = current.copy()
+        best_candidate_fitness = current_fitness
+        swap_attempts = min(5, n)  # Try up to 5 swaps, scaled with n
+
+        for _ in range(swap_attempts):
+            # Select indices to swap, prioritizing worst row/column
+            i1 = worst_row * n + random.choice(range(n))
+            i2 = random.choice(range(n)) * n + worst_col
+            if i1 == i2:
+                continue  # Skip if same index
+
+            # Create candidate by swapping
+            candidate = current.copy()
+            candidate[i1], candidate[i2] = candidate[i2], candidate[i1]
+
+            # Ensure candidate maintains unique numbers
+            if len(np.unique(candidate)) != n * n:
+                continue
+
+            candidate_fitness = fitness_score(candidate, n)
+
+            # Update best candidate if better
+            if candidate_fitness > best_candidate_fitness:
+                best_candidate = candidate
+                best_candidate_fitness = candidate_fitness
+
+        # Simulated annealing acceptance
+        delta_fitness = best_candidate_fitness - current_fitness
+        if delta_fitness > 0 or random.random() < math.exp(delta_fitness / temp):
+            current = best_candidate
+            current_fitness = best_candidate_fitness
+            no_improvement_count = 0
+        else:
+            no_improvement_count += 1
+
+        # Update best solution
+        if current_fitness > best_fitness:
+            best = current.copy()
+            best_fitness = current_fitness
+            no_improvement_count = 0
+
+        # Early stopping
+        if current_fitness >= 1:  # Perfect solution found
+            return current
+        if no_improvement_count >= max_no_improvement:
+            break
+
+    return best
+
+
 # Main genetic algorithm
 population = [generate_individual(n) for _ in range(population_size)]
 avg_fitness = []
@@ -249,6 +341,7 @@ magic_square_generation = -1
 most_perfect_generation = -1
 
 print(f"Starting evolution for {n}x{n} magic square...")
+print(f"Evolution type: {evolution_type.name}")
 print(f"Magic constant should be: {magic_constant(n)}")
 if n % 4 == 0:
     print(
@@ -273,14 +366,45 @@ for age in range(generations):
         new_individuals = [generate_individual(n) for _ in range(population_size // 10)]
         population = population[: -len(new_individuals)] + new_individuals
 
-    # Evaluate fitness
+    # Evaluate fitness with optional optimization
     use_diversity_bonus = diversity < 0.4
-    population_fitness = [
-        fitness_score(
-            ind, n, population if use_diversity_bonus else None, use_diversity_bonus
-        )
-        for ind in population
-    ]
+    optimized_population = []
+
+    if evolution_type != EvolutionType.ORIGINAL:
+        # Create optimized versions for Lamarckian or Darwinian
+        optimized_population = [
+            optimize_individual(ind, n, optimization_steps) for ind in population
+        ]
+
+    if evolution_type == EvolutionType.LAMARCKIAN:
+        # Use optimized individuals for fitness calculation AND pass them to next generation
+        population_fitness = [
+            fitness_score(
+                opt_ind,
+                n,
+                optimized_population if use_diversity_bonus else None,
+                use_diversity_bonus,
+            )
+            for opt_ind in optimized_population
+        ]
+    elif evolution_type == EvolutionType.DARWINIAN:
+        # Use optimized individuals for fitness calculation but original for next generation
+        population_fitness = [
+            fitness_score(
+                opt_ind,
+                n,
+                population if use_diversity_bonus else None,
+                use_diversity_bonus,
+            )
+            for opt_ind in optimized_population
+        ]
+    else:  # ORIGINAL
+        population_fitness = [
+            fitness_score(
+                ind, n, population if use_diversity_bonus else None, use_diversity_bonus
+            )
+            for ind in population
+        ]
 
     current_best = max(population_fitness)
     best_fitness.append(current_best)
@@ -288,18 +412,19 @@ for age in range(generations):
 
     # Check for valid magic square and most-perfect magic square
     best_idx = np.argmax(population_fitness)
+    best_individual = population[best_idx]
 
-    if not magic_square_found and is_magic_square(population[best_idx], n):
+    if not magic_square_found and is_magic_square(best_individual, n):
         magic_square_found = True
         magic_square_generation = age
         print(f"Regular magic square found at generation {age}!")
-        if n % 4 != 0: # if n is not a multiple of 4, we can stop here
+        if n % 4 != 0:  # if n is not a multiple of 4, we can stop here
             break
 
     if (
         n % 4 == 0
         and not most_perfect_found
-        and is_most_perfect_magic_square(population[best_idx], n)
+        and is_most_perfect_magic_square(best_individual, n)
     ):
         most_perfect_found = True
         most_perfect_generation = age
@@ -319,7 +444,12 @@ for age in range(generations):
     elite_count = max(1, population_size // 10)  # Keep top 10%
     elite_indices = np.argsort(population_fitness)[-elite_count:]
     for idx in elite_indices:
-        new_population.append(population[idx].copy())
+        if evolution_type == EvolutionType.LAMARCKIAN:
+            # In Lamarckian, we pass the optimized versions
+            new_population.append(optimized_population[idx].copy())
+        else:
+            # In Darwinian and Original, we pass the original versions
+            new_population.append(population[idx].copy())
 
     mutation_methods = ["swap", "scramble", "inversion"]
 
@@ -341,7 +471,7 @@ ax1.plot(range(len(avg_fitness)), avg_fitness, "r-", label="Avg Fitness", alpha=
 ax1.plot(range(len(best_fitness)), best_fitness, "g-", label="Best Fitness")
 ax1.set_xlabel("Generation")
 ax1.set_ylabel("Fitness")
-ax1.set_title("Fitness Evolution")
+ax1.set_title(f"Fitness Evolution ({evolution_type.name})")
 ax1.legend()
 ax1.grid(True, alpha=0.3)
 
@@ -392,6 +522,7 @@ plt.show()
 print("\n" + "=" * 50)
 print("FINAL RESULTS")
 print("=" * 50)
+print(f"Evolution type: {evolution_type.name}")
 print("Magic constant:", magic_constant(n))
 print("Best solution found:")
 print(best_square)
