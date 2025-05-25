@@ -13,7 +13,7 @@ class EvolutionType(Enum):
 
 
 # Parameters
-n = 5 # nxn magic square
+n = 3 # nxn magic square
 population_size = 100
 base_mutation_rate = 0.7
 adaptive_mutation = True
@@ -265,79 +265,78 @@ def mutate(individual, mutation_rate, n, method="swap"):
 
     return individual
 
-def calc_problamtic_positions(individual, n):
-    # Find problematic positions (in rows/cols and diagonals with wrong sums)
-    diag1 = np.sum(np.diag(individual))
-    diag2 = np.sum(np.diag(np.fliplr(individual)))
-    M = magic_constant(n)
-    problematic_positions = []
-    
-    for i in range(n):
-        row_sum = np.sum(individual[i, :])
-        for j in range(n):
-            col_sum = np.sum(individual[:, i])
-            if abs(row_sum - M) > 0:
-                if abs(col_sum - M) > 0:  # Row i and j have wrong sum
-                    problematic_positions.append((i, j))
-            if i == j and abs(diag1 - M) > 0: # row and diagonal1 bad
-                problematic_positions.append((i, j))
-            if (i+j == n) and abs(diag2 - M) > 0: # row and diagonal2 bad
-                problematic_positions.append((i, j))
-    # Remove duplicates
-    problematic_positions = list(set(problematic_positions))
 
-    if len(problematic_positions < 2): # no collision between rows
-        number_of bad 
-
-    return problematic_positions
-            
-            
-    return problamtic_positions
-def optimize_individual(individual, n, max_steps=None):
+def optimize_individual(individual, n, max_steps=None, temp=1.0, cooling_rate=0.95):
     """Optimize magic square using targeted hill climbing with intelligent swap selection."""
     if max_steps is None:
-        max_steps = n  # Default to n steps if not specified
+        max_steps = n * 5  # More steps for thorough optimization
 
     current = individual.copy()
     current_fitness = fitness_score(current, n)
+    M = magic_constant(n)
     best = current.copy()
     best_fitness = current_fitness
 
     for step in range(max_steps):
-        # Each step = exactly one swap attempt
+        # Find the best swap among all possible swaps
+        best_swap = None
+        best_swap_fitness = current_fitness
+        
+        # Try a subset of swaps to balance exploration and efficiency
+        swap_candidates = []
         square = current.reshape(n, n)
         
+        # Identify problematic positions (in rows/cols with wrong sums)
+        row_sums = np.sum(square, axis=1)
+        col_sums = np.sum(square, axis=0)
+        
         problematic_positions = []
-        problematic_positions.extend(calc_problamtic_positions(square, n))
+        for i in range(n):
+            if abs(row_sums[i] - M) > 0:  # Row i has wrong sum
+                problematic_positions.extend([(i, j) for j in range(n)])
+            if abs(col_sums[i] - M) > 0:  # Column i has wrong sum
+                problematic_positions.extend([(j, i) for j in range(n)])
         
-        # Choose  swap to try this step
+        # Remove duplicates
+        problematic_positions = list(set(problematic_positions))
+        
+        # If we have problematic positions, focus swaps on them
         if problematic_positions and len(problematic_positions) > 1:
-            # Focus on problematic positions
-            pos1 = random.choice(problematic_positions)
-            pos2 = random.choice(problematic_positions)
-            if pos1 == pos2:
-                # Fallback to random if same position chosen
-                pos2 = (random.randint(0, n -1), random.randint(0, n -1))
+            # Try swaps involving problematic positions
+            for i in range(min(20, len(problematic_positions))):  # Limit to 20 swaps
+                pos1 = random.choice(problematic_positions)
+                pos2 = random.choice(problematic_positions)
+                if pos1 != pos2:
+                    idx1 = pos1[0] * n + pos1[1]
+                    idx2 = pos2[0] * n + pos2[1]
+                    swap_candidates.append((idx1, idx2))
         else:
-            # Random swap if no clear problematic positions
-            pos1 = (random.randint(0, n -1), random.randint(0, n -1))
-            pos2 = (random.randint(0, n -1), random.randint(0, n -1))
+            # If no clear problematic positions, try random swaps
+            for _ in range(20):  # Try 20 random swaps
+                idx1, idx2 = random.sample(range(len(current)), 2)
+                swap_candidates.append((idx1, idx2))
         
-        # Try this swap
-        idx1 = pos1[0] * n + pos1[1]
-        idx2 = pos2[0] * n + pos2[1]
-        candidate = current.copy()
-        candidate[idx1], candidate[idx2] = candidate[idx2], candidate[idx1]
-        candidate_fitness = fitness_score(candidate, n)
+        # Evaluate all swap candidates
+        for idx1, idx2 in swap_candidates:
+            candidate = current.copy()
+            candidate[idx1], candidate[idx2] = candidate[idx2], candidate[idx1]
+            candidate_fitness = fitness_score(candidate, n)
+            
+            if candidate_fitness > best_swap_fitness:
+                best_swap = (idx1, idx2)
+                best_swap_fitness = candidate_fitness
         
-        # Apply swap if it improves fitness
-        if candidate_fitness > current_fitness:
-            current = candidate
-            current_fitness = candidate_fitness
+        # Apply the best swap if it improves fitness
+        if best_swap and best_swap_fitness > current_fitness:
+            current[best_swap[0]], current[best_swap[1]] = current[best_swap[1]], current[best_swap[0]]
+            current_fitness = best_swap_fitness
             
             if current_fitness > best_fitness:
                 best = current.copy()
                 best_fitness = current_fitness
+        else:
+            # No improvement found, stop early
+            break
         
         # If we found a perfect solution, return immediately
         if current_fitness >= 0.999:  # Close to 1.0 (perfect)
