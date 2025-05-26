@@ -13,16 +13,16 @@ class EvolutionType(Enum):
 
 
 # Parameters
-n = 5 # nxn magic square
+n = 3 # nxn magic square
 population_size = 100
 base_mutation_rate = 0.7
 adaptive_mutation = True
 generations = 500
-diversity_threshold = 0.3  # Trigger diversity measures if similarity > 80%
+diversity_threshold = 0.4  # Trigger diversity measures if too similar
 tournament_size = 7  # For tournament selection
-evolution_type = EvolutionType.LAMARCKIAN # Change this to switch between versions
+evolution_type = EvolutionType.DARWINIAN # Change this to switch between versions
 optimization_steps = n  # Number of local optimization steps to perform
-prioritize_most_perfect = False
+prioritize_most_perfect = True
 
 
 # Generate initial population (random permutations of 1 to n²)
@@ -33,8 +33,6 @@ def generate_individual(n):
 # Calculate population diversity
 def calculate_diversity(population):
     """Calculate diversity as average pairwise differences"""
-    if len(population) < 2:
-        return 1.0
     total_differences = 0
     comparisons = 0
     for i in range(len(population)):
@@ -142,7 +140,7 @@ def most_perfect_fitness_component(individual, n):
 
 
 def fitness_score(
-    individual, n, population=None, diversity_bonus=False
+    individual, n
 ):
     square = np.array(individual).reshape(n, n)
     M = magic_constant(n)
@@ -174,13 +172,7 @@ def fitness_score(
             most_perfect_score * 0.5
         )  # Weight the most-perfect component
 
-    # Diversity bonus
-    diversity_bonus_score = 0
-    if diversity_bonus and population is not None:
-        uniqueness = calculate_individual_uniqueness(individual, population)
-        diversity_bonus_score = 0.1 * uniqueness
-
-    return base_fitness + most_perfect_bonus + diversity_bonus_score
+    return base_fitness + most_perfect_bonus
 
 
 def calculate_individual_uniqueness(individual, population):
@@ -203,8 +195,29 @@ def tournament_selection(population, fitness_scores, tournament_size):
     return population[winner_idx]
 
 
-# Partially Matched Crossover (PMX)
-def pmx_crossover(parent1, parent2, n):
+def crossover(parent1, parent2, n):
+    size = n * n
+    
+    # Choose crossover points
+    start, end = sorted(random.sample(range(size), 2))
+    
+    # Create child with -1 placeholders
+    child = [-1] * size
+    
+    # Copy segment from parent1
+    child[start:end] = parent1[start:end]
+    
+    # Fill remaining positions with parent2's order
+    child_idx = end % size
+    parent2_idx = end % size
+    
+    while -1 in child:
+        if parent2[parent2_idx] not in child:
+            child[child_idx] = parent2[parent2_idx]
+            child_idx = (child_idx + 1) % size
+        parent2_idx = (parent2_idx + 1) % size
+    
+    return np.array(child)
     size = n * n
     child1 = [-1] * size  # Use -1 to indicate unfilled positions
     child2 = [-1] * size
@@ -243,7 +256,7 @@ def pmx_crossover(parent1, parent2, n):
     return np.array(child1 if random.random() < 0.5 else child2)
 
 
-def mutate(individual, mutation_rate, n, method="swap"):
+def mutate(individual, mutation_rate, n, method="scramble"):
     if random.random() > mutation_rate:
         return individual
     individual = individual.copy()
@@ -265,88 +278,107 @@ def mutate(individual, mutation_rate, n, method="swap"):
 
     return individual
 
-def calc_problamtic_positions(individual, n):
-    # Find problematic positions (in rows/cols and diagonals with wrong sums)
-    diag1 = np.sum(np.diag(individual))
-    diag2 = np.sum(np.diag(np.fliplr(individual)))
+def get_problematic_positions(square, n):
+    """Find positions that are in problematic rows/columns/diagonals"""
     M = magic_constant(n)
-    problematic_positions = []
+    problematic_positions = set()
     
+    # Check rows
     for i in range(n):
-        row_sum = np.sum(individual[i, :])
-        for j in range(n):
-            col_sum = np.sum(individual[:, i])
-            if abs(row_sum - M) > 0:
-                if abs(col_sum - M) > 0:  # Row i and j have wrong sum
-                    problematic_positions.append((i, j))
-            if i == j and abs(diag1 - M) > 0: # row and diagonal1 bad
-                problematic_positions.append((i, j))
-            if (i+j == n) and abs(diag2 - M) > 0: # row and diagonal2 bad
-                problematic_positions.append((i, j))
-    # Remove duplicates
-    problematic_positions = list(set(problematic_positions))
+        if abs(np.sum(square[i, :]) - M) > 0:
+            for j in range(n):
+                problematic_positions.add((i, j))
+    
+    # Check columns
+    for j in range(n):
+        if abs(np.sum(square[:, j]) - M) > 0:
+            for i in range(n):
+                problematic_positions.add((i, j))
+    
+    # Check main diagonal
+    if abs(np.sum(np.diag(square)) - M) > 0:
+        for i in range(n):
+            problematic_positions.add((i, i))
+    
+    # Check anti-diagonal
+    if abs(np.sum(np.diag(np.fliplr(square))) - M) > 0:
+        for i in range(n):
+            problematic_positions.add((i, n-1-i))
+    
+    return list(set(problematic_positions))
 
-    if len(problematic_positions) < 2: # no collision
-        # add full diagonal
-        1+1 # change it later
 
-    return problematic_positions
-            
-            
-    return problamtic_positions
-def optimize_individual(individual, n, max_steps=None):
+def optimize_individual(individual, n, max_steps=None, temp=1.0, cooling_rate=0.95):
     """Optimize magic square using targeted hill climbing with intelligent swap selection."""
     if max_steps is None:
-        max_steps = n  # Default to n steps if not specified
+        max_steps = n
 
     current = individual.copy()
     current_fitness = fitness_score(current, n)
+    M = magic_constant(n)
     best = current.copy()
     best_fitness = current_fitness
 
     for step in range(max_steps):
-        # Each step = exactly one swap attempt
+        # Find the best swap among all possible swaps
+        best_swap = None
+        best_swap_fitness = current_fitness
+        
+        # Try a subset of swaps to balance exploration and efficiency
+        swap_candidates = []
         square = current.reshape(n, n)
         
-        problematic_positions = []
-        problematic_positions.extend(calc_problamtic_positions(square, n))
+        # Identify problematic positions (in rows/cols with wrong sums)
+        row_sums = np.sum(square, axis=1)
+        col_sums = np.sum(square, axis=0)
         
-        # Choose  swap to try this step
+        problematic_positions = get_problematic_positions(square, n)
+        
+        # If we have problematic positions, focus swaps on them
         if problematic_positions and len(problematic_positions) > 1:
-            # Focus on problematic positions
-            pos1 = random.choice(problematic_positions)
-            pos2 = random.choice(problematic_positions)
-            if pos1 == pos2:
-                # Fallback to random if same position chosen
-                pos2 = (random.randint(0, n -1), random.randint(0, n -1))
+            # Try swaps involving problematic positions
+            for i in range(min(2, len(problematic_positions))):  # Limit to 2 swaps
+                pos1 = random.choice(problematic_positions)
+                pos2 = random.choice(problematic_positions)
+                if pos1 != pos2:
+                    idx1 = pos1[0] * n + pos1[1]
+                    idx2 = pos2[0] * n + pos2[1]
+                    swap_candidates.append((idx1, idx2))
         else:
-            # Random swap if no clear problematic positions
-            pos1 = (random.randint(0, n -1), random.randint(0, n -1))
-            pos2 = (random.randint(0, n -1), random.randint(0, n -1))
+            # If no clear problematic positions, try random swaps
+            for _ in range(2):  # Try 2 random swaps
+                idx1, idx2 = random.sample(range(len(current)), 2)
+                swap_candidates.append((idx1, idx2))
         
-        # Try this swap
-        idx1 = pos1[0] * n + pos1[1]
-        idx2 = pos2[0] * n + pos2[1]
-        candidate = current.copy()
-        candidate[idx1], candidate[idx2] = candidate[idx2], candidate[idx1]
-        candidate_fitness = fitness_score(candidate, n)
+        # Evaluate all swap candidates
+        for idx1, idx2 in swap_candidates:
+            candidate = current.copy()
+            candidate[idx1], candidate[idx2] = candidate[idx2], candidate[idx1]
+            candidate_fitness = fitness_score(candidate, n)
+            
+            if candidate_fitness > best_swap_fitness:
+                best_swap = (idx1, idx2)
+                best_swap_fitness = candidate_fitness
         
-        # Apply swap if it improves fitness
-        if candidate_fitness > current_fitness:
-            current = candidate
-            current_fitness = candidate_fitness
+        # Apply the best swap if it improves fitness
+        if best_swap and best_swap_fitness > current_fitness:
+            current[best_swap[0]], current[best_swap[1]] = current[best_swap[1]], current[best_swap[0]]
+            current_fitness = best_swap_fitness
             
             if current_fitness > best_fitness:
                 best = current.copy()
                 best_fitness = current_fitness
+        else:
+            # No improvement found, stop early
+            break
         
         # If we found a perfect solution, return immediately
-        if current_fitness >= 0.999:  # Close to 1.0 (perfect)
+        if current_fitness >= 1:
             return current
 
     return best
 
-# Main genetic algorithm
+# Main algorithm
 population = [generate_individual(n) for _ in range(population_size)]
 avg_fitness = []
 best_fitness = []
@@ -380,14 +412,26 @@ for age in range(generations):
              current_mutation_rate = min(0.9, base_mutation_rate * 1.5)
     mutation_rates.append(current_mutation_rate)
 
-    # Diversity injection
+    # Diversity injection - replace worst individuals with new random ones
     if diversity < diversity_threshold:
-        new_individuals = [generate_individual(n) for _ in range(population_size // 10)]
-        population += new_individuals
-        population = sorted(population, key=lambda ind: fitness_score(ind, n), reverse=True)[:population_size]
+        # Calculate fitness for current population to identify worst individuals
+        current_fitness = [fitness_score(ind, n) for ind in population]
+        
+        # Number of new individuals to inject
+        num_new = population_size // 10
+        
+        # Find indices of worst individuals
+        worst_indices = np.argsort(current_fitness)[:num_new]
+        
+        # Generate new random individuals
+        new_individuals = [generate_individual(n) for _ in range(num_new)]
+        
+        # Replace worst individuals with new ones
+        for i, worst_idx in enumerate(worst_indices):
+            population[worst_idx] = new_individuals[i]
 
     # Evaluate fitness with optional optimization
-    use_diversity_bonus = diversity < 0.4
+
     optimized_population = []
 
     if evolution_type != EvolutionType.ORIGINAL:
@@ -401,9 +445,7 @@ for age in range(generations):
         population_fitness = [
             fitness_score(
                 opt_ind,
-                n,
-                optimized_population if use_diversity_bonus else None,
-                use_diversity_bonus,
+                n
             )
             for opt_ind in optimized_population
         ]
@@ -413,16 +455,14 @@ for age in range(generations):
         population_fitness = [
             fitness_score(
                 opt_ind,
-                n,
-                population if use_diversity_bonus else None,
-                use_diversity_bonus,
+                n
             )
             for opt_ind in optimized_population
         ]
     else:  # ORIGINAL
         population_fitness = [
             fitness_score(
-                ind, n, population if use_diversity_bonus else None, use_diversity_bonus
+                ind, n
             )
             for ind in population
         ]
@@ -477,7 +517,7 @@ for age in range(generations):
     while len(new_population) < population_size:
         parent1 = tournament_selection(population, population_fitness, tournament_size)
         parent2 = tournament_selection(population, population_fitness, tournament_size)
-        child = pmx_crossover(parent1, parent2, n)
+        child = crossover(parent1, parent2, n)
         mut_method = random.choice(mutation_methods)
         child = mutate(child, current_mutation_rate, n, mut_method)
         new_population.append(child)
@@ -501,7 +541,7 @@ ax2.plot(
     range(len(diversity_history)), diversity_history, "b-", label="Population Diversity"
 )
 ax2.axhline(
-    y=0.3, color="r", linestyle="--", alpha=0.5, label="Low Diversity Threshold"
+    y=diversity_threshold, color="r", linestyle="--", alpha=0.5, label="Low Diversity Threshold"
 )
 ax2.set_xlabel("Generation")
 ax2.set_ylabel("Diversity")
