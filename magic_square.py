@@ -13,14 +13,14 @@ class EvolutionType(Enum):
 
 
 # Parameters
-n = 3 # nxn magic square
+n = 4 # nxn magic square
 population_size = 100
 base_mutation_rate = 0.7
 adaptive_mutation = True
 generations = 500
 diversity_threshold = 0.4  # Trigger diversity measures if too similar
 tournament_size = 7  # For tournament selection
-evolution_type = EvolutionType.DARWINIAN # Change this to switch between versions
+evolution_type = EvolutionType.LAMARCKIAN # Change this to switch between versions
 optimization_steps = n  # Number of local optimization steps to perform
 prioritize_most_perfect = True
 
@@ -157,12 +157,8 @@ def fitness_score(
     diag2_sum = np.sum(np.diag(np.fliplr(square)))
     total_deviation += abs(diag1_sum - M) + abs(diag2_sum - M)
 
-    # Penalty for non-unique elements
-    counts = Counter(individual)
-    duplicate_penalty = sum((count - 1) * 100 for count in counts.values() if count > 1)
-
     # Base fitness (magic square fitness)
-    base_fitness = 1 / (1 + total_deviation + duplicate_penalty)
+    base_fitness = 1 / (1 + total_deviation)
 
     # Most-perfect fitness component (only for n%4=0)
     most_perfect_bonus = 0
@@ -218,42 +214,6 @@ def crossover(parent1, parent2, n):
         parent2_idx = (parent2_idx + 1) % size
     
     return np.array(child)
-    size = n * n
-    child1 = [-1] * size  # Use -1 to indicate unfilled positions
-    child2 = [-1] * size
-    
-    # Choose crossover points
-    start, end = sorted(random.sample(range(size), 2))
-    
-    # Copy the middle section from each parent
-    child1[start:end] = parent1[start:end]
-    child2[start:end] = parent2[start:end]
-    
-    # Create mapping dictionaries
-    mapping1 = {}  # parent1 -> parent2
-    mapping2 = {}  # parent2 -> parent1
-    
-    for i in range(start, end):
-        mapping1[parent1[i]] = parent2[i]
-        mapping2[parent2[i]] = parent1[i]
-    
-    # Fill the remaining positions
-    for i in range(size):
-        if i < start or i >= end:
-            # For child1, try to place parent2[i]
-            value = parent2[i]
-            while value in child1[start:end]:  # If value is already in the copied section
-                value = mapping1.get(value, value)  # Map it
-            child1[i] = value
-            
-            # For child2, try to place parent1[i]
-            value = parent1[i]
-            while value in child2[start:end]:  # If value is already in the copied section
-                value = mapping2.get(value, value)  # Map it
-            child2[i] = value
-    
-    # Return one of the children randomly
-    return np.array(child1 if random.random() < 0.5 else child2)
 
 
 def mutate(individual, mutation_rate, n, method="scramble"):
@@ -327,10 +287,6 @@ def optimize_individual(individual, n, max_steps=None, temp=1.0, cooling_rate=0.
         # Try a subset of swaps to balance exploration and efficiency
         swap_candidates = []
         square = current.reshape(n, n)
-        
-        # Identify problematic positions (in rows/cols with wrong sums)
-        row_sums = np.sum(square, axis=1)
-        col_sums = np.sum(square, axis=0)
         
         problematic_positions = get_problematic_positions(square, n)
         
