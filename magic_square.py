@@ -13,7 +13,7 @@ class EvolutionType(Enum):
 
 
 # Parameters
-n = 4 # nxn magic square
+n = 5 # nxn magic square
 population_size = 100
 base_mutation_rate = 0.7
 adaptive_mutation = True
@@ -242,97 +242,84 @@ def get_problematic_positions(square, n):
     """Find positions that are in problematic rows/columns/diagonals"""
     M = magic_constant(n)
     problematic_positions = set()
-    
+
     # Check rows
     for i in range(n):
         if abs(np.sum(square[i, :]) - M) > 0:
             for j in range(n):
                 problematic_positions.add((i, j))
-    
+
     # Check columns
     for j in range(n):
         if abs(np.sum(square[:, j]) - M) > 0:
             for i in range(n):
                 problematic_positions.add((i, j))
-    
+
     # Check main diagonal
     if abs(np.sum(np.diag(square)) - M) > 0:
         for i in range(n):
             problematic_positions.add((i, i))
-    
+
     # Check anti-diagonal
     if abs(np.sum(np.diag(np.fliplr(square))) - M) > 0:
         for i in range(n):
             problematic_positions.add((i, n-1-i))
-    
+
     return list(set(problematic_positions))
 
 
 def optimize_individual(individual, n, max_steps=None, temp=1.0, cooling_rate=0.95):
-    """Optimize magic square using targeted hill climbing with intelligent swap selection."""
     if max_steps is None:
-        max_steps = n
+        max_steps = n * 2  # Increase for larger squares
 
     current = individual.copy()
     current_fitness = fitness_score(current, n)
-    M = magic_constant(n)
     best = current.copy()
     best_fitness = current_fitness
 
     for step in range(max_steps):
-        # Find the best swap among all possible swaps
+        # Try multiple swaps and keep the best
         best_swap = None
         best_swap_fitness = current_fitness
-        
-        # Try a subset of swaps to balance exploration and efficiency
-        swap_candidates = []
-        square = current.reshape(n, n)
-        
-        problematic_positions = get_problematic_positions(square, n)
-        
-        # If we have problematic positions, focus swaps on them
-        if problematic_positions and len(problematic_positions) > 1:
-            # Try swaps involving problematic positions
-            for i in range(min(2, len(problematic_positions))):  # Limit to 2 swaps
-                pos1 = random.choice(problematic_positions)
-                pos2 = random.choice(problematic_positions)
-                if pos1 != pos2:
-                    idx1 = pos1[0] * n + pos1[1]
-                    idx2 = pos2[0] * n + pos2[1]
-                    swap_candidates.append((idx1, idx2))
-        else:
-            # If no clear problematic positions, try random swaps
-            for _ in range(2):  # Try 2 random swaps
-                idx1, idx2 = random.sample(range(len(current)), 2)
-                swap_candidates.append((idx1, idx2))
-        
-        # Evaluate all swap candidates
-        for idx1, idx2 in swap_candidates:
+
+        # Try more swaps for larger squares
+        num_swaps_to_try = min(50, n * n)  # Try more swaps for larger squares
+
+        for _ in range(num_swaps_to_try):
+            idx1, idx2 = random.sample(range(len(current)), 2)
             candidate = current.copy()
             candidate[idx1], candidate[idx2] = candidate[idx2], candidate[idx1]
             candidate_fitness = fitness_score(candidate, n)
-            
+
             if candidate_fitness > best_swap_fitness:
                 best_swap = (idx1, idx2)
                 best_swap_fitness = candidate_fitness
-        
-        # Apply the best swap if it improves fitness
-        if best_swap and best_swap_fitness > current_fitness:
-            current[best_swap[0]], current[best_swap[1]] = current[best_swap[1]], current[best_swap[0]]
+
+        if best_swap:
+            current[best_swap[0]], current[best_swap[1]] = (
+                current[best_swap[1]],
+                current[best_swap[0]],
+            )
             current_fitness = best_swap_fitness
-            
+
             if current_fitness > best_fitness:
                 best = current.copy()
                 best_fitness = current_fitness
-        else:
-            # No improvement found, stop early
-            break
-        
-        # If we found a perfect solution, return immediately
-        if current_fitness >= 1:
+
+        # Simulated annealing acceptance
+        elif random.random() < math.exp(-1 / temp):
+            # Accept worse solution to escape local optima
+            idx1, idx2 = random.sample(range(len(current)), 2)
+            current[idx1], current[idx2] = current[idx2], current[idx1]
+            current_fitness = fitness_score(current, n)
+
+        temp *= cooling_rate
+
+        if current_fitness >= 1:  # Perfect solution found
             return current
 
     return best
+
 
 # Main algorithm
 population = [generate_individual(n) for _ in range(population_size)]
@@ -458,7 +445,7 @@ for age in range(generations):
     new_population = []
 
     # Elitism: keep best individuals
-    elite_count = max(1, population_size // 20)  # Keep top candidates
+    elite_count = 0
     elite_indices = np.argsort(population_fitness)[-elite_count:]
     for idx in elite_indices:
         if evolution_type == EvolutionType.LAMARCKIAN:
