@@ -20,7 +20,7 @@ adaptive_mutation = True
 generations = 500
 diversity_threshold = 0.4  # Trigger diversity measures if too similar
 tournament_size = 7  # For tournament selection
-evolution_type = EvolutionType.LAMARCKIAN # Change this to switch between versions
+evolution_type = EvolutionType.LAMARCKIAN  # Change this to switch between versions
 optimization_steps = n  # Number of local optimization steps to perform
 prioritize_most_perfect = True
 
@@ -352,23 +352,23 @@ for age in range(generations):
         if diversity < 0.3:
             current_mutation_rate = min(0.9, base_mutation_rate * 3)
         elif diversity < 0.5:
-             current_mutation_rate = min(0.9, base_mutation_rate * 1.5)
+            current_mutation_rate = min(0.9, base_mutation_rate * 1.5)
     mutation_rates.append(current_mutation_rate)
 
     # Diversity injection - replace worst individuals with new random ones
     if diversity < diversity_threshold:
         # Calculate fitness for current population to identify worst individuals
         current_fitness = [fitness_score(ind, n) for ind in population]
-        
+
         # Number of new individuals to inject
         num_new = population_size // 10
-        
+
         # Find indices of worst individuals
         worst_indices = np.argsort(current_fitness)[:num_new]
-        
+
         # Generate new random individuals
         new_individuals = [generate_individual(n) for _ in range(num_new)]
-        
+
         # Replace worst individuals with new ones
         for i, worst_idx in enumerate(worst_indices):
             population[worst_idx] = new_individuals[i]
@@ -444,8 +444,11 @@ for age in range(generations):
     # Selection and reproduction
     new_population = []
 
-    # Elitism: keep best individuals
-    elite_count = 0
+    # Elitism: keep best individuals, bigger elite count for larger lamarckian populations
+    if evolution_type == EvolutionType.LAMARCKIAN:
+        elite_count = int(population_size * 0.9)
+    else:
+        elite_count = int(population_size * 0.1)
     elite_indices = np.argsort(population_fitness)[-elite_count:]
     for idx in elite_indices:
         if evolution_type == EvolutionType.LAMARCKIAN:
