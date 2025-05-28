@@ -4,6 +4,7 @@ import math
 import matplotlib.pyplot as plt
 from collections import Counter
 from enum import Enum
+import sys
 
 
 class EvolutionType(Enum):
@@ -13,7 +14,7 @@ class EvolutionType(Enum):
 
 
 # Parameters
-n = 5 # nxn magic square
+n = 4 # nxn magic square
 population_size = 100
 base_mutation_rate = 0.7
 adaptive_mutation = True
@@ -322,6 +323,14 @@ def optimize_individual(individual, n, max_steps=None, temp=1.0, cooling_rate=0.
 
 
 # Main algorithm
+# Handle command line argument for wraparound
+if len(sys.argv) > 1:
+    n = int(sys.argv[1])
+if len(sys.argv) > 2:
+    if int(sys.argv[2]) == 0:
+        evolution_type = EvolutionType.ORIGINAL
+    if int(sys.argv[2]) == 2:
+        evolution_type = EvolutionType.DARWINIAN   
 population = [generate_individual(n) for _ in range(population_size)]
 avg_fitness = []
 best_fitness = []
