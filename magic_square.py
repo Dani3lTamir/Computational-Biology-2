@@ -221,6 +221,7 @@ def crossover(parent1, parent2, n):
 
 
 def mutate(individual, mutation_rate, n, method="scramble"):
+    """Mutate an individual with given mutation rate and method"""
     if random.random() > mutation_rate:
         return individual
     individual = individual.copy()
@@ -274,6 +275,7 @@ def get_problematic_positions(square, n):
 
 
 def optimize_individual(individual, n, max_steps=None, temp=1.0, cooling_rate=0.95):
+    """Optimize an individual using simulated annealing with local search"""
     if max_steps is None:
         max_steps = n * 2  # Increase for larger squares
 
