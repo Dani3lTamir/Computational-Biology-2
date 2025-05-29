@@ -22,6 +22,9 @@ diversity_threshold = 0.4  # Trigger diversity measures if too similar
 tournament_size = 7  # For tournament selection
 prioritize_most_perfect = True
 
+# Global fitness function call counter
+fitness_call_counter = 0
+
 
 # Generate initial population (random permutations of 1 to n²)
 def generate_individual(n):
@@ -138,6 +141,10 @@ def most_perfect_fitness_component(individual, n):
 
 
 def fitness_score(individual, n):
+    """Calculate fitness score and increment global counter"""
+    global fitness_call_counter
+    fitness_call_counter += 1
+
     square = np.array(individual).reshape(n, n)
     M = magic_constant(n)
     total_deviation = 0
@@ -361,6 +368,9 @@ def get_user_input():
 
 def run_evolution(n, evolution_type):
     """Run the evolution algorithm with given parameters"""
+    global fitness_call_counter
+    fitness_call_counter = 0  # Reset counter for each run
+
     optimization_steps = n  # Number of local optimization steps to perform
 
     population = [generate_individual(n) for _ in range(population_size)]
@@ -512,6 +522,7 @@ def run_evolution(n, evolution_type):
         most_perfect_found,
         magic_square_generation,
         most_perfect_generation,
+        fitness_call_counter,  # Return the counter
     )
 
 
@@ -527,6 +538,7 @@ def display_results(
     most_perfect_found,
     magic_square_generation,
     most_perfect_generation,
+    total_fitness_calls,  # New parameter
 ):
     """Display results in plots and console output"""
 
@@ -599,6 +611,7 @@ def display_results(
     print("FINAL RESULTS")
     print("=" * 50)
     print(f"Evolution type: {evolution_type.name}")
+    print(f"Total fitness function calls: {total_fitness_calls:,}")
     print("Magic constant:", magic_constant(n))
     print("Best solution found:")
     print(best_square)
