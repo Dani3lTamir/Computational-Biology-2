@@ -195,6 +195,7 @@ def tournament_selection(population, fitness_scores, tournament_size):
 
 
 def crossover(parent1, parent2, n):
+    """Perform order crossover on two parents"""
     size = n * n
 
     # Choose crossover points
